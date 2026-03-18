@@ -6,11 +6,13 @@ transformations and spatial correlation calculations.
 """
 
 import math
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Optional
 
 import numpy as np
+import geopandas as gpd
 from scipy.spatial.distance import pdist, squareform
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString
+from sklearn.neighbors import BallTree
 
 
 def calculate_haversine_distance(
@@ -97,6 +99,77 @@ def calculate_spatial_correlation(
     return float(correlation) if not np.isnan(correlation) else 0.0
 
 
+def transform_wgs84_to_gcj02(
+    lng: Union[float, np.ndarray],
+    lat: Union[float, np.ndarray],
+) -> Tuple[Union[float, np.ndarray], Union[float, np.ndarray]]:
+    """Transform coordinates from WGS84 to GCJ02 (Mars Coordinates).
+    
+    This is an intermediate step in the WGS84 to BD09 transformation.
+    Used by Chinese mapping services including Baidu.
+    
+    Args:
+        lng: Longitude(s) in WGS84.
+        lat: Latitude(s) in WGS84.
+        
+    Returns:
+        Tuple of (gcj_lng, gcj_lat) in GCJ02 coordinate system.
+    """
+    # China GPS offset algorithm
+    pi = math.pi
+    a = 6378245.0  # Major axis
+    ee = 0.00669342162296594323  # Eccentricity squared
+    
+    def _transform_lat(lng, lat):
+        ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + \
+              0.1 * lng * lat + 0.2 * math.sqrt(abs(lng))
+        ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
+                math.sin(2.0 * lng * pi)) * 2.0 / 3.0
+        ret += (20.0 * math.sin(lat * pi) + 40.0 *
+                math.sin(lat / 3.0 * pi)) * 2.0 / 3.0
+        ret += (160.0 * math.sin(lat / 12.0 * pi) + 320 *
+                math.sin(lat * pi / 30.0)) * 2.0 / 3.0
+        return ret
+    
+    def _transform_lng(lng, lat):
+        ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + \
+              0.1 * lng * lat + 0.1 * math.sqrt(abs(lng))
+        ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
+                math.sin(2.0 * lng * pi)) * 2.0 / 3.0
+        ret += (20.0 * math.sin(lng * pi) + 40.0 *
+                math.sin(lng / 3.0 * pi)) * 2.0 / 3.0
+        ret += (150.0 * math.sin(lng / 12.0 * pi) + 300.0 *
+                math.sin(lng / 30.0 * pi)) * 2.0 / 3.0
+        return ret
+    
+    # Handle both scalars and arrays
+    is_scalar = np.isscalar(lng)
+    if is_scalar:
+        lng = np.array([lng])
+        lat = np.array([lat])
+    else:
+        lng = np.array(lng)
+        lat = np.array(lat)
+    
+    dlat = _transform_lat(lng - 105.0, lat - 35.0)
+    dlng = _transform_lng(lng - 105.0, lat - 35.0)
+    
+    radlat = lat / 180.0 * pi
+    magic = np.sin(radlat)
+    magic = 1 - ee * magic * magic
+    sqrtmagic = np.sqrt(magic)
+    
+    dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * pi)
+    dlng = (dlng * 180.0) / (a / sqrtmagic * np.cos(radlat) * pi)
+    
+    gcj_lat = lat + dlat
+    gcj_lng = lng + dlng
+    
+    if is_scalar:
+        return float(gcj_lng[0]), float(gcj_lat[0])
+    return gcj_lng, gcj_lat
+
+
 def transform_wgs84_to_bd09(
     lng: Union[float, np.ndarray],
     lat: Union[float, np.ndarray],
@@ -114,69 +187,71 @@ def transform_wgs84_to_bd09(
         Tuple of (bd_lng, bd_lat) in BD09 coordinate system.
         
     Note:
-        This is an approximate transformation. For precise applications,
-        use the official Baidu Coordinate Transformation API.
+        This transformation first converts WGS84 to GCJ02 (Mars Coordinates),
+        then GCJ02 to BD09.
     """
-    # First transform: WGS84 -> GCJ02 (Mars Coordinates)
-    def _wgs84_to_gcj02(lng, lat):
-        pi = math.pi
-        a = 6378245.0  # Major axis
-        ee = 0.00669342162296594323  # Eccentricity squared
-        
-        dlat = _transform_lat(lng - 105.0, lat - 35.0)
-        dlng = _transform_lng(lng - 105.0, lat - 35.0)
-        
-        radlat = lat / 180.0 * pi
-        magic = math.sin(radlat)
-        magic = 1 - ee * magic * magic
-        sqrtmagic = math.sqrt(magic)
-        
-        dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * pi)
-        dlng = (dlng * 180.0) / (a / sqrtmagic * math.cos(radlat) * pi)
-        
-        mglat = lat + dlat
-        mglng = lng + dlng
-        
-        return mglng, mglat
-    
-    def _transform_lat(lng, lat):
-        pi = math.pi
-        ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + \
-              0.1 * lng * lat + 0.2 * math.sqrt(abs(lng))
-        ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
-                math.sin(2.0 * lng * pi)) * 2.0 / 3.0
-        ret += (20.0 * math.sin(lat * pi) + 40.0 *
-                math.sin(lat / 3.0 * pi)) * 2.0 / 3.0
-        ret += (160.0 * math.sin(lat / 12.0 * pi) + 320 *
-                math.sin(lat * pi / 30.0)) * 2.0 / 3.0
-        return ret
-    
-    def _transform_lng(lng, lat):
-        pi = math.pi
-        ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + \
-              0.1 * lng * lat + 0.1 * math.sqrt(abs(lng))
-        ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
-                math.sin(2.0 * lng * pi)) * 2.0 / 3.0
-        ret += (20.0 * math.sin(lng * pi) + 40.0 *
-                math.sin(lng / 3.0 * pi)) * 2.0 / 3.0
-        ret += (150.0 * math.sin(lng / 12.0 * pi) + 300.0 *
-                math.sin(lng / 30.0 * pi)) * 2.0 / 3.0
-        return ret
+    # First transform: WGS84 -> GCJ02
+    gcj_lng, gcj_lat = transform_wgs84_to_gcj02(lng, lat)
     
     # Second transform: GCJ02 -> BD09
-    def _gcj02_to_bd09(lng, lat):
-        pi = math.pi
-        z = math.sqrt(lng * lng + lat * lat) + 0.00002 * math.sin(lat * pi * 3000.0 / 180.0)
-        theta = math.atan2(lat, lng) + 0.000003 * math.cos(lng * pi * 3000.0 / 180.0)
-        bd_lng = z * math.cos(theta) + 0.0065
-        bd_lat = z * math.sin(theta) + 0.006
-        return bd_lng, bd_lat
+    pi = math.pi
     
-    # Apply transformations
-    gcj_lng, gcj_lat = _wgs84_to_gcj02(lng, lat)
-    bd_lng, bd_lat = _gcj02_to_bd09(gcj_lng, gcj_lat)
+    is_scalar = np.isscalar(gcj_lng)
+    if is_scalar:
+        gcj_lng = np.array([gcj_lng])
+        gcj_lat = np.array([gcj_lat])
     
+    x = gcj_lng
+    y = gcj_lat
+    z = np.sqrt(x * x + y * y) + 0.00002 * np.sin(y * pi * 3000.0 / 180.0)
+    theta = np.arctan2(y, x) + 0.000003 * np.cos(x * pi * 3000.0 / 180.0)
+    
+    bd_lng = z * np.cos(theta) + 0.0065
+    bd_lat = z * np.sin(theta) + 0.006
+    
+    if is_scalar:
+        return float(bd_lng[0]), float(bd_lat[0])
     return bd_lng, bd_lat
+
+
+def transform_bd09_to_wgs84(
+    lng: Union[float, np.ndarray],
+    lat: Union[float, np.ndarray],
+) -> Tuple[Union[float, np.ndarray], Union[float, np.ndarray]]:
+    """Transform coordinates from BD09 to WGS84.
+    
+    Reverse transformation of Baidu coordinates to standard WGS84.
+    Uses iterative approximation for accuracy.
+    
+    Args:
+        lng: Longitude(s) in BD09.
+        lat: Latitude(s) in BD09.
+        
+    Returns:
+        Tuple of (wgs_lng, wgs_lat) in WGS84 coordinate system.
+    """
+    is_scalar = np.isscalar(lng)
+    if is_scalar:
+        lng = np.array([lng])
+        lat = np.array([lat])
+    else:
+        lng = np.array(lng)
+        lat = np.array(lat)
+    
+    # Iterative approximation
+    wgs_lng = lng.copy()
+    wgs_lat = lat.copy()
+    
+    for _ in range(5):  # 5 iterations should converge
+        test_lng, test_lat = transform_wgs84_to_bd09(wgs_lng, wgs_lat)
+        d_lng = test_lng - lng
+        d_lat = test_lat - lat
+        wgs_lng -= d_lng
+        wgs_lat -= d_lat
+    
+    if is_scalar:
+        return float(wgs_lng[0]), float(wgs_lat[0])
+    return wgs_lng, wgs_lat
 
 
 def calculate_point_density(
@@ -245,3 +320,187 @@ def create_spatial_grid(
         lat += lat_step
     
     return cells
+
+
+def calculate_road_density(
+    network_gdf: gpd.GeoDataFrame,
+    boundary: Optional[Tuple[float, float, float, float]] = None,
+) -> float:
+    """Calculate road network density from GeoDataFrame.
+    
+    This function calculates road density following the methodology in
+    Wang et al. (2025), measuring total road length per unit area.
+    
+    Args:
+        network_gdf: GeoDataFrame with LineString road geometries.
+        boundary: Optional bounding box (min_lat, min_lng, max_lat, max_lng).
+            If not provided, uses the bounds of the network.
+            
+    Returns:
+        Road density in km/km².
+        
+    Note:
+        Based on Wang et al. (2025) Section 3.2, road density is a key
+        factor in determining optimal sampling intervals.
+    """
+    if network_gdf.empty:
+        return 0.0
+    
+    # Ensure correct CRS (WGS84 for length calculation)
+    if network_gdf.crs is None or network_gdf.crs.to_string() != "EPSG:4326":
+        network_gdf = network_gdf.to_crs("EPSG:4326")
+    
+    # Calculate total road length in km
+    # For WGS84, we need to convert to projected CRS for accurate length
+    # Use an appropriate UTM zone based on centroid
+    centroid = network_gdf.geometry.unary_union.centroid
+    utm_zone = int((centroid.x + 180) / 6) + 1
+    hemisphere = 'N' if centroid.y >= 0 else 'S'
+    epsg_code = 32600 + utm_zone if hemisphere == 'N' else 32700 + utm_zone
+    
+    try:
+        network_proj = network_gdf.to_crs(f"EPSG:{epsg_code}")
+        total_length_km = network_proj.geometry.length.sum() / 1000
+    except Exception:
+        # Fallback: use haversine approximation
+        total_length_km = _calculate_length_haversine(network_gdf) / 1000
+    
+    # Calculate area
+    if boundary is None:
+        bounds = network_gdf.total_bounds
+        min_lng, min_lat, max_lng, max_lat = bounds
+    else:
+        min_lat, min_lng, max_lat, max_lng = boundary
+    
+    # Calculate area in km²
+    width = calculate_haversine_distance(min_lat, min_lng, min_lat, max_lng)
+    height = calculate_haversine_distance(min_lat, min_lng, max_lat, min_lng)
+    area_km2 = (width * height) / 1e6
+    
+    if area_km2 == 0:
+        return 0.0
+    
+    return total_length_km / area_km2
+
+
+def _calculate_length_haversine(network_gdf: gpd.GeoDataFrame) -> float:
+    """Calculate total network length using haversine formula.
+    
+    Fallback method when projection fails.
+    
+    Args:
+        network_gdf: GeoDataFrame with LineString geometries.
+        
+    Returns:
+        Total length in meters.
+    """
+    total_length = 0.0
+    
+    for geom in network_gdf.geometry:
+        if geom.geom_type == 'LineString':
+            coords = list(geom.coords)
+            for i in range(len(coords) - 1):
+                lng1, lat1 = coords[i]
+                lng2, lat2 = coords[i + 1]
+                total_length += calculate_haversine_distance(lat1, lng1, lat2, lng2)
+        elif geom.geom_type == 'MultiLineString':
+            for line in geom.geoms:
+                coords = list(line.coords)
+                for i in range(len(coords) - 1):
+                    lng1, lat1 = coords[i]
+                    lng2, lat2 = coords[i + 1]
+                    total_length += calculate_haversine_distance(lat1, lng1, lat2, lng2)
+    
+    return total_length
+
+
+def find_nearest_neighbors(
+    points: np.ndarray,
+    query_points: np.ndarray,
+    k: int = 1,
+    max_distance: Optional[float] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Find nearest neighbors using BallTree with haversine metric.
+    
+    Args:
+        points: Reference points array of shape (n, 2) with (lat, lng) in degrees.
+        query_points: Query points array of shape (m, 2) with (lat, lng) in degrees.
+        k: Number of nearest neighbors to find.
+        max_distance: Optional maximum distance in meters.
+        
+    Returns:
+        Tuple of (distances, indices) arrays. Distances in meters.
+    """
+    # Convert to radians
+    points_rad = np.deg2rad(points)
+    query_rad = np.deg2rad(query_points)
+    
+    # Create BallTree
+    tree = BallTree(points_rad, metric='haversine')
+    
+    # Query
+    if max_distance is not None:
+        max_radius = max_distance / 6371000  # Convert to radians
+        distances, indices = tree.query(query_rad, k=k, sort_results=True)
+        # Filter by distance
+        mask = distances <= max_radius
+        distances = np.where(mask, distances, np.inf)
+        indices = np.where(mask, indices, -1)
+    else:
+        distances, indices = tree.query(query_rad, k=k, sort_results=True)
+    
+    # Convert distances to meters
+    distances_m = distances * 6371000
+    
+    return distances_m, indices
+
+
+def calculate_overlap_ratio(
+    point1: Tuple[float, float],
+    point2: Tuple[float, float],
+    fov: float = 90.0,
+    view_distance: float = 50.0,
+) -> float:
+    """Calculate the overlap ratio between two SVI viewing areas.
+    
+    This estimates the spatial correlation based on field of view overlap,
+    used in Wang et al. (2025) for redundancy estimation.
+    
+    Args:
+        point1: (lat, lng) of first point.
+        point2: (lat, lng) of second point.
+        fov: Field of view in degrees.
+        view_distance: Viewing distance in meters.
+        
+    Returns:
+        Estimated overlap ratio (0-1).
+    """
+    distance = calculate_haversine_distance(
+        point1[0], point1[1], point2[0], point2[1]
+    )
+    
+    if distance >= view_distance * 2:
+        return 0.0
+    
+    # Simplified overlap estimation based on circular FOV areas
+    # Area of intersection of two circles
+    r = view_distance
+    d = distance
+    
+    if d == 0:
+        return 1.0
+    
+    # Circle intersection formula
+    if d >= 2 * r:
+        return 0.0
+    
+    # Calculate intersection area
+    term1 = r * r * math.acos(d / (2 * r))
+    term2 = (d / 2) * math.sqrt(r * r - (d * d) / 4)
+    intersection = 2 * (term1 - term2)
+    
+    # Normalize by single circle area
+    circle_area = math.pi * r * r
+    overlap_ratio = intersection / circle_area
+    
+    return min(overlap_ratio, 1.0)
