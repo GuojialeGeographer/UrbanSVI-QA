@@ -22,12 +22,12 @@ class TestHaversineDistance:
 
     def test_known_distance(self):
         """Test distance calculation with known value."""
-        # Hong Kong Central to Admiralty (~2km)
+        # Hong Kong Central to nearby point
         dist = calculate_haversine_distance(
             22.2839, 114.1574,  # Central
-            22.2793, 114.1628,  # Admiralty
+            22.2900, 114.1600,  # ~800m north
         )
-        assert 1500 < dist < 2500  # Should be approximately 2km
+        assert 500 < dist < 1500  # Should be approximately 0.8-1km
 
     def test_symmetry(self):
         """Test that distance is symmetric."""

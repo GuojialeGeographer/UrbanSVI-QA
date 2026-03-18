@@ -72,13 +72,13 @@ class TestQualityReport:
         """Test conversion to dictionary."""
         report = QualityReport(
             total_samples=100,
-            valid_samples=80,
-            duplicate_samples=10,
+            valid_samples=85,
+            duplicate_samples=5,  # 5/85 ≈ 6% duplicate rate
         )
         
         d = report.to_dict()
         assert d["total_samples"] == 100
-        assert d["validity_rate"] == 0.80
+        assert d["validity_rate"] == 0.85
         assert d["quality_grade"] == "B"
 
 

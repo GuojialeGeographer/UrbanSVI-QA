@@ -156,7 +156,7 @@ if report.temporal_distribution:
         print(f"  {year}: {count} samples")
 
 # Export report
-report.generate_report(report, f"{OUTPUT_DIR}/quality_report.html", format="html")
+auditor.generate_report(report, f"{OUTPUT_DIR}/quality_report.html", format="html")
 print(f"\nQuality report exported to {OUTPUT_DIR}/quality_report.html")
 
 # %% 7. Summary

@@ -122,24 +122,24 @@ def transform_wgs84_to_gcj02(
     
     def _transform_lat(lng, lat):
         ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + \
-              0.1 * lng * lat + 0.2 * math.sqrt(abs(lng))
-        ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
-                math.sin(2.0 * lng * pi)) * 2.0 / 3.0
-        ret += (20.0 * math.sin(lat * pi) + 40.0 *
-                math.sin(lat / 3.0 * pi)) * 2.0 / 3.0
-        ret += (160.0 * math.sin(lat / 12.0 * pi) + 320 *
-                math.sin(lat * pi / 30.0)) * 2.0 / 3.0
+              0.1 * lng * lat + 0.2 * np.sqrt(np.abs(lng))
+        ret += (20.0 * np.sin(6.0 * lng * pi) + 20.0 *
+                np.sin(2.0 * lng * pi)) * 2.0 / 3.0
+        ret += (20.0 * np.sin(lat * pi) + 40.0 *
+                np.sin(lat / 3.0 * pi)) * 2.0 / 3.0
+        ret += (160.0 * np.sin(lat / 12.0 * pi) + 320 *
+                np.sin(lat * pi / 30.0)) * 2.0 / 3.0
         return ret
     
     def _transform_lng(lng, lat):
         ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + \
-              0.1 * lng * lat + 0.1 * math.sqrt(abs(lng))
-        ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
-                math.sin(2.0 * lng * pi)) * 2.0 / 3.0
-        ret += (20.0 * math.sin(lng * pi) + 40.0 *
-                math.sin(lng / 3.0 * pi)) * 2.0 / 3.0
-        ret += (150.0 * math.sin(lng / 12.0 * pi) + 300.0 *
-                math.sin(lng / 30.0 * pi)) * 2.0 / 3.0
+              0.1 * lng * lat + 0.1 * np.sqrt(np.abs(lng))
+        ret += (20.0 * np.sin(6.0 * lng * pi) + 20.0 *
+                np.sin(2.0 * lng * pi)) * 2.0 / 3.0
+        ret += (20.0 * np.sin(lng * pi) + 40.0 *
+                np.sin(lng / 3.0 * pi)) * 2.0 / 3.0
+        ret += (150.0 * np.sin(lng / 12.0 * pi) + 300.0 *
+                np.sin(lng / 30.0 * pi)) * 2.0 / 3.0
         return ret
     
     # Handle both scalars and arrays
