@@ -1,0 +1,34 @@
+name: urban-svi-qa
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - numpy>=1.24.0
+  - pandas>=2.0.0
+  - geopandas>=0.14.0
+  - shapely>=2.0.0
+  - scipy>=1.11.0
+  - scikit-learn>=1.3.0
+  - matplotlib>=3.7.0
+  - seaborn>=0.13.0
+  - jupyter
+  - pip:
+    - osmnx>=1.8.0
+    - requests>=2.31.0
+    - tqdm>=4.65.0
+    - pydantic>=2.0.0
+    - python-dotenv>=1.0.0
+    # Dev dependencies
+    - pytest>=7.4.0
+    - pytest-cov>=4.1.0
+    - ruff>=0.1.0
+    - mypy>=1.6.0
+    - pre-commit>=3.5.0
+    # Docs dependencies
+    - sphinx>=7.2.0
+    - sphinx-rtd-theme>=1.3.0
+    - sphinx-autodoc-typehints>=1.24.0
+    - myst-parser>=2.0.0
+    - nbsphinx>=0.9.0
